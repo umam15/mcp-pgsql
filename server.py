@@ -403,12 +403,11 @@ def get_running_queries() -> dict:
                        usename,
                        datname,
                        state,
-                       wait_event_type,
-                       wait_event,
+                       waiting,
                        LEFT(query, 200) AS query,
-                       NOW() - query_start AS duration
+                       (NOW() - query_start)::text AS duration
                 FROM pg_stat_activity
-                WHERE query NOT LIKE '%%pg_stat_activity%%'
+                WHERE query NOT LIKE '%pg_stat_activity%'
                   AND pid <> pg_backend_pid()
                 ORDER BY query_start DESC
                 """

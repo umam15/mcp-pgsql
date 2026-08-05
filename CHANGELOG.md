@@ -5,6 +5,16 @@ Semua perubahan penting pada proyek ini akan dicatat di file ini.
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan
 [semantic versioning](https://semver.org/).
 
+## [0.3.1] - 2026-08-05
+
+### Fixed
+
+- Tool `get_running_queries`: kompatibel dengan PostgreSQL < 9.6 (ganti `wait_event_type`/`wait_event` dengan `waiting`)
+
+### Added
+
+- `.env.example` sebagai template konfigurasi env var
+
 ## [0.3.0] - 2026-08-05
 
 ### Added
@@ -39,6 +49,7 @@ Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan
 - Tool `get_schema` untuk membaca skema database
 - Workflow Auto Release (GitHub Actions & Gitea Actions)
 
+[0.3.1]: https://github.com/owner/mcp-pgsql/releases/tag/v0.3.1
 [0.3.0]: https://github.com/owner/mcp-pgsql/releases/tag/v0.3.0
 [0.2.0]: https://github.com/owner/mcp-pgsql/releases/tag/v0.2.0
 [0.1.0]: https://github.com/owner/mcp-pgsql/releases/tag/v0.1.0
