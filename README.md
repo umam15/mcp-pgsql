@@ -44,11 +44,19 @@ Kemudian daftarkan server MCP ini ke client MCP (misal: Claude Desktop, Cursor, 
 
 ## Daftar Tool
 
-| Tool            | Deskripsi                          |
-|-----------------|------------------------------------|
-| `execute_sql`   | Menjalankan query SQL sembarang    |
-| `list_databases`| Menampilkan daftar database        |
-| `get_schema`    | Menampilkan skema database         |
+| Tool                   | Deskripsi                                     |
+|------------------------|-----------------------------------------------|
+| `execute_sql`          | Menjalankan query SQL sembarang               |
+| `list_databases`       | Menampilkan daftar database                   |
+| `get_schema`           | Menampilkan skema database                    |
+| `list_schemas`         | Menampilkan daftar skema                      |
+| `describe_table`       | Detail satu tabel (kolom, PK, FK, default)    |
+| `list_views`           | Menampilkan daftar view                       |
+| `list_extensions`      | Menampilkan extension terpasang               |
+| `get_table_stats`      | Ukuran & estimasi row count tabel             |
+| `explain_query`        | Rencana eksekusi query (`EXPLAIN`)            |
+| `get_running_queries`  | Query aktif (`pg_stat_activity`)              |
+| `kill_query`           | Menghentikan query via `pg_terminate_backend` |
 
 ## Lisensi
 

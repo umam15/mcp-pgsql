@@ -179,5 +179,265 @@ def _fetch_constraints(conn, schema, table_name):
         ]
 
 
+@mcp.tool()
+def list_schemas() -> dict:
+    """Menampilkan daftar skema yang tersedia di database."""
+    conn = None
+    try:
+        conn = get_connection(autocommit=True)
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT schema_name, schema_owner
+                FROM information_schema.schemata
+                ORDER BY schema_name
+                """
+            )
+            result = rows_to_dicts(cur)
+        return {"schemas": result, "count": len(result)}
+    except Exception as e:
+        return {"error": str(e)}
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+@mcp.tool()
+def describe_table(table: str, schema: str = "public") -> dict:
+    """Menampilkan detail satu tabel: kolom, tipe, PK/FK, dan default."""
+    conn = None
+    try:
+        conn = get_connection(autocommit=True)
+        columns = _fetch_columns(conn, schema, table)
+        primary_keys = _fetch_primary_keys(conn, schema, table)
+        foreign_keys = _fetch_foreign_keys(conn, schema, table)
+        indexes = _fetch_indexes(conn, schema, table)
+        return {
+            "schema": schema,
+            "table": table,
+            "columns": columns,
+            "primary_keys": primary_keys,
+            "foreign_keys": foreign_keys,
+            "indexes": indexes,
+            "column_count": len(columns),
+        }
+    except Exception as e:
+        return {"error": str(e)}
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def _fetch_primary_keys(conn, schema, table_name):
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT kcu.column_name
+            FROM information_schema.table_constraints tc
+            JOIN information_schema.key_column_usage kcu
+              ON tc.constraint_name = kcu.constraint_name
+             AND tc.table_schema = kcu.table_schema
+            WHERE tc.table_schema = %s
+              AND tc.table_name = %s
+              AND tc.constraint_type = 'PRIMARY KEY'
+            ORDER BY kcu.ordinal_position
+            """,
+            (schema, table_name),
+        )
+        return [row[0] for row in cur.fetchall()]
+
+
+def _fetch_foreign_keys(conn, schema, table_name):
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT kcu.column_name,
+                   ccu.table_schema AS foreign_schema,
+                   ccu.table_name AS foreign_table,
+                   ccu.column_name AS foreign_column
+            FROM information_schema.table_constraints tc
+            JOIN information_schema.key_column_usage kcu
+              ON tc.constraint_name = kcu.constraint_name
+             AND tc.table_schema = kcu.table_schema
+            JOIN information_schema.constraint_column_usage ccu
+              ON ccu.constraint_name = tc.constraint_name
+             AND ccu.table_schema = tc.table_schema
+            WHERE tc.table_schema = %s
+              AND tc.table_name = %s
+              AND tc.constraint_type = 'FOREIGN KEY'
+            ORDER BY kcu.ordinal_position
+            """,
+            (schema, table_name),
+        )
+        return [
+            {
+                "column": column,
+                "references": {
+                    "schema": foreign_schema,
+                    "table": foreign_table,
+                    "column": foreign_column,
+                },
+            }
+            for column, foreign_schema, foreign_table, foreign_column in cur.fetchall()
+        ]
+
+
+@mcp.tool()
+def list_views(schema: str = "public", view_pattern: str = "%") -> dict:
+    """Menampilkan daftar view di skema tertentu."""
+    conn = None
+    try:
+        conn = get_connection(autocommit=True)
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT table_name, view_definition
+                FROM information_schema.views
+                WHERE table_schema = %s AND table_name LIKE %s
+                ORDER BY table_name
+                """,
+                (schema, view_pattern),
+            )
+            result = [
+                {"name": name, "definition": definition}
+                for name, definition in cur.fetchall()
+            ]
+        return {"schema": schema, "views": result, "count": len(result)}
+    except Exception as e:
+        return {"error": str(e)}
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+@mcp.tool()
+def list_extensions() -> dict:
+    """Menampilkan daftar extension PostgreSQL yang terpasang."""
+    conn = None
+    try:
+        conn = get_connection(autocommit=True)
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT extname AS name,
+                       extversion AS version,
+                       n.nspname AS schema
+                FROM pg_extension e
+                JOIN pg_namespace n ON n.oid = e.extnamespace
+                ORDER BY extname
+                """
+            )
+            result = rows_to_dicts(cur)
+        return {"extensions": result, "count": len(result)}
+    except Exception as e:
+        return {"error": str(e)}
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+@mcp.tool()
+def get_table_stats(table: str, schema: str = "public") -> dict:
+    """Menampilkan estimasi ukuran & row count sebuah tabel."""
+    conn = None
+    try:
+        conn = get_connection(autocommit=True)
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT pg_size_pretty(pg_total_relation_size(%s)) AS total_size,
+                       pg_size_pretty(pg_relation_size(%s)) AS table_size,
+                       pg_size_pretty(pg_total_relation_size(%s) - pg_relation_size(%s)) AS index_size,
+                       reltuples::bigint AS estimated_rows,
+                       relpages AS pages
+                FROM pg_class
+                JOIN pg_namespace n ON n.oid = relnamespace
+                WHERE n.nspname = %s AND relname = %s
+                """,
+                (
+                    f"{schema}.{table}",
+                    f"{schema}.{table}",
+                    f"{schema}.{table}",
+                    f"{schema}.{table}",
+                    schema,
+                    table,
+                ),
+            )
+            result = rows_to_dicts(cur)
+        return {"schema": schema, "table": table, "stats": result}
+    except Exception as e:
+        return {"error": str(e)}
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+@mcp.tool()
+def explain_query(query: str, analyze: bool = False) -> dict:
+    """Menampilkan rencana eksekusi query (`EXPLAIN`). Opsional `analyze` untuk eksekusi nyata."""
+    conn = None
+    try:
+        conn = get_connection(autocommit=True)
+        with conn.cursor() as cur:
+            plan_query = f"EXPLAIN {'ANALYZE ' if analyze else ''}({query})"
+            cur.execute(plan_query)
+            plan = [row[0] for row in cur.fetchall()]
+        return {"query": query, "analyze": analyze, "plan": plan}
+    except Exception as e:
+        return {"query": query, "error": str(e)}
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+@mcp.tool()
+def get_running_queries() -> dict:
+    """Menampilkan query yang sedang berjalan (via pg_stat_activity)."""
+    conn = None
+    try:
+        conn = get_connection(autocommit=True)
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT pid,
+                       usename,
+                       datname,
+                       state,
+                       wait_event_type,
+                       wait_event,
+                       LEFT(query, 200) AS query,
+                       NOW() - query_start AS duration
+                FROM pg_stat_activity
+                WHERE query NOT LIKE '%%pg_stat_activity%%'
+                  AND pid <> pg_backend_pid()
+                ORDER BY query_start DESC
+                """
+            )
+            result = rows_to_dicts(cur)
+        return {"running_queries": result, "count": len(result)}
+    except Exception as e:
+        return {"error": str(e)}
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+@mcp.tool()
+def kill_query(pid: int) -> dict:
+    """Menghentikan query berjalan pada pid tertentu (pg_terminate_backend)."""
+    conn = None
+    try:
+        conn = get_connection(autocommit=True)
+        with conn.cursor() as cur:
+            cur.execute("SELECT pg_terminate_backend(%s)", (pid,))
+            terminated = cur.fetchone()[0]
+        return {"pid": pid, "terminated": terminated}
+    except Exception as e:
+        return {"pid": pid, "error": str(e)}
+    finally:
+        if conn is not None:
+            conn.close()
+
+
 if __name__ == "__main__":
     mcp.run(transport="stdio")
