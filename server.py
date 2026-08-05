@@ -1,4 +1,5 @@
 import os
+import re
 
 import psycopg2
 from dotenv import load_dotenv
@@ -12,11 +13,37 @@ PGDATABASE = os.getenv("PGDATABASE", "postgres")
 PGUSER = os.getenv("PGUSER", "postgres")
 PGPASSWORD = os.getenv("PGPASSWORD", "")
 PGSSL = os.getenv("PGSSL", "disable")
+READ_ONLY = os.getenv("PGREADONLY", "true").lower() in {"1", "true", "yes", "on"}
+
+_WRITE_KEYWORDS = frozenset(
+    {
+        "INSERT",
+        "UPDATE",
+        "DELETE",
+        "MERGE",
+        "CREATE",
+        "DROP",
+        "ALTER",
+        "TRUNCATE",
+        "GRANT",
+        "REVOKE",
+        "COPY",
+        "CALL",
+        "DO",
+        "VACUUM",
+        "REINDEX",
+        "CLUSTER",
+        "REFRESH",
+        "SECURITY",
+        "IMPORT",
+        "ANALYZE",
+    }
+)
 
 mcp = MCPServer(name="mcp-pgsql", version="0.1.0")
 
 
-def get_connection(autocommit: bool = False):
+def get_connection(autocommit: bool = False, read_only: bool = READ_ONLY):
     conn = psycopg2.connect(
         host=PGHOST,
         port=PGPORT,
@@ -26,6 +53,11 @@ def get_connection(autocommit: bool = False):
         sslmode=PGSSL,
     )
     conn.autocommit = autocommit
+    if read_only:
+        with conn.cursor() as cur:
+            cur.execute("SET default_transaction_read_only = on")
+            if not conn.autocommit:
+                conn.commit()
     return conn
 
 
@@ -34,12 +66,46 @@ def rows_to_dicts(cursor):
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
+def _clean_sql(sql: str) -> str:
+    sql = re.sub(r"\$[A-Za-z0-9_]*\$.*?\$[A-Za-z0-9_]*\$", " ", sql, flags=re.S)
+    sql = re.sub(r"'(?:''|[^'])*'", " ", sql)
+    sql = re.sub(r'"(?:[^"]|"")*"', " ", sql)
+    sql = re.sub(r"--[^\n]*", " ", sql)
+    sql = re.sub(r"/\*.*?\*/", " ", sql, flags=re.S)
+    return sql
+
+
+def is_write_query(query: str) -> bool:
+    clean = _clean_sql(query)
+    words = [w.upper() for w in re.findall(r"\b[A-Za-z_][A-Za-z0-9_]*\b", clean)]
+    if not words:
+        return False
+    first = words[0]
+    if first in _WRITE_KEYWORDS:
+        return True
+    if first == "EXPLAIN":
+        if "ANALYZE" in words[1:]:
+            idx = words.index("ANALYZE", 1)
+            return any(w in _WRITE_KEYWORDS for w in words[idx + 1 :])
+        return False
+    if first == "WITH":
+        return any(w in _WRITE_KEYWORDS for w in words[1:])
+    if first == "SELECT":
+        return "INTO" in words[1:]
+    return False
+
+
 @mcp.tool()
-def execute_sql(query: str, autocommit: bool = False) -> dict:
-    """Menjalankan query SQL sembarang (SELECT, INSERT, UPDATE, DELETE, DDL, dll)."""
+def execute_sql(query: str, autocommit: bool = False, allow_write: bool = False) -> dict:
+    """Menjalankan query SQL. Secara default hanya read-only; set `allow_write=True` untuk mengizinkan query yang mengubah data."""
+    if READ_ONLY and not allow_write and is_write_query(query):
+        return {
+            "query": query,
+            "error": "Query bersifat write (INSERT/UPDATE/DELETE/DDL). Server dalam mode read-only. Gunakan allow_write=True untuk mengizinkan.",
+        }
     conn = None
     try:
-        conn = get_connection(autocommit=autocommit)
+        conn = get_connection(autocommit=autocommit, read_only=READ_ONLY and not allow_write)
         with conn.cursor() as cur:
             cur.execute(query)
             if cur.description:

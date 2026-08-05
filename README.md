@@ -31,10 +31,17 @@ Server ini dikonfigurasi lewat environment variable:
 | `PGUSER`         | Username PostgreSQL          | `postgres`    |
 | `PGPASSWORD`     | Password PostgreSQL          | *(kosong)*    |
 | `PGSSL`          | Mode SSL (`disable`/`require`) | `disable`   |
+| `PGREADONLY`     | Mode read-only default (`true`/`false`) | `true` |
 
-## Penggunaan
+## Mode Read-Only
 
-Jalankan server:
+Secara default server berjalan dalam mode **read-only** (`PGREADONLY=true`):
+
+- Tool `execute_sql` menolak query yang mengubah data (INSERT, UPDATE, DELETE, DDL, dsb.)
+- Koneksi juga di-set `default_transaction_read_only=on` oleh PostgreSQL sebagai lapisan keamanan kedua
+- Untuk mengizinkan query yang menulis data, set env `PGREADONLY=false` **atau** panggil tool dengan parameter `allow_write=True`
+
+Untuk uji coba lokal:
 
 ```bash
 python server.py
